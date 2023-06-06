@@ -50,49 +50,62 @@ func main() {
 
 	if strings.ToLower(os.Args[1]) == "add" {
 		addUser(os.Args[2], conn)
+	} else if strings.ToLower(os.Args[1]) == "delete" {
+		deleteUser(os.Args[2], conn)
 	}
 }
 
 func generatePassword() string {
-	rand.Seed(time.Now().UnixNano())
+	random := rand.New(rand.NewSource(time.Now().UnixNano()))
 	var passwordLength = 16
 	var charset = []byte(`abcdefghijklmnopqrstuvwxyz!@#$%^&*()-_<>,./?"'{}~\|+=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789`)
 	pwd := make([]byte, passwordLength)
 	for i := range pwd {
 		// randomly select 1 character from given charset
-		pwd[i] = charset[rand.Intn(len(charset))]
+		pwd[i] = charset[random.Intn(len(charset))]
 	}
 	return string(pwd)
 }
 
 func addUser(email string, conn *sql.DB) {
-	var version string
-	err := conn.QueryRow("SELECT VERSION()").Scan(&version)
+	timestamp := time.Now()
+	newUser := Row{
+		Email:     email,
+		Password:  generatePassword(),
+		Created:   timestamp.Format("2006-01-02 15:04:05"),
+		LastLogin: timestamp.Format("2006-01-02 15:04:05"),
+	}
+
+	query := fmt.Sprintf("INSERT INTO %s (email, password, created, last_login) VALUES(?, ?, ?, ?)", tableName)
+	insert, err := conn.Prepare(query)
 	if err != nil {
 		log.Fatal(err)
-	} else {
-		timestamp := time.Now()
-		newUser := Row{
-			Email:     email,
-			Password:  generatePassword(),
-			Created:   timestamp.Format("2006-01-02 15:04:05"),
-			LastLogin: timestamp.Format("2006-01-02 15:04:05"),
-		}
-
-		query := fmt.Sprintf("INSERT INTO %s (email, password, created, last_login) VALUES(?, ?, ?, ?)", tableName)
-		insert, err := conn.Prepare(query)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		passwordHash := md5.Sum([]byte(newUser.Password))
-		resp, err := insert.Exec(newUser.Email, hex.EncodeToString(passwordHash[:]), newUser.Created, newUser.LastLogin)
-		if err != nil {
-			log.Fatal(err)
-		}
-		insert.Close()
-
-		affectedRows, _ := resp.RowsAffected()
-		fmt.Printf("Rows affected: %d\nUsername: %s\nPassword: %s\n(Save this password as it will not be saved anywhere)", affectedRows, newUser.Email, newUser.Password)
 	}
+
+	passwordHash := md5.Sum([]byte(newUser.Password))
+	resp, err := insert.Exec(newUser.Email, hex.EncodeToString(passwordHash[:]), newUser.Created, newUser.LastLogin)
+	if err != nil {
+		log.Fatal(err)
+	}
+	insert.Close()
+
+	affectedRows, _ := resp.RowsAffected()
+	fmt.Printf("Rows affected: %d\nUsername: %s\nPassword: %s\n(Save this password as it will not be saved anywhere)", affectedRows, newUser.Email, newUser.Password)
+	}
+}
+
+func deleteUser(email string, conn *sql.DB) {
+	query := fmt.Sprintf("DELETE FROM `%s`.`%s` WHERE (email = '%s')", dbName, tableName, email)
+	del, err := conn.Prepare(query)
+	if err != nil {
+		log.Fatal(err)
+	}
+	resp, err := del.Exec()
+	if err != nil {
+		log.Fatal(err)
+	}
+	del.Close()
+
+	affectedRows, _ := resp.RowsAffected()
+	fmt.Printf("Rows affected: %d\nUser deleted: %s\n", affectedRows, email)
 }
